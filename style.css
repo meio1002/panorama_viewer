@@ -1,0 +1,74 @@
+html, body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: #000;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#viewer {
+  width: 100vw;
+  height: 100vh;
+}
+
+#ui {
+  position: fixed;
+  left: 16px;
+  top: 16px;
+  z-index: 10;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: white;
+  user-select: none;
+}
+
+.title {
+  width: 100%;
+  font-weight: 700;
+  font-size: 16px;
+  text-shadow: 0 1px 6px rgba(0,0,0,.6);
+}
+
+.hint {
+  width: 100%;
+  font-size: 12px;
+  opacity: .88;
+  margin-bottom: 4px;
+  text-shadow: 0 1px 6px rgba(0,0,0,.6);
+}
+
+button,
+.upload {
+  border: 1px solid rgba(255,255,255,.35);
+  border-radius: 999px;
+  background: rgba(0,0,0,.45);
+  color: white;
+  padding: 8px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+}
+
+button:hover,
+.upload:hover {
+  background: rgba(255,255,255,.18);
+}
+
+.upload input {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  #ui {
+    left: 12px;
+    right: 12px;
+    top: 12px;
+  }
+
+  .hint {
+    display: none;
+  }
+}
