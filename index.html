@@ -11,12 +11,17 @@
 
   <div id="ui">
     <div class="title">360° Panorama Viewer</div>
-    <div class="hint">ドラッグで視点移動 / ホイールでズーム / 画像を差し替え可能</div>
+    <div class="hint">ドラッグで視点移動 / ホイールでズーム / スマホはモーション操作対応</div>
 
     <label class="upload">
       パノラマ画像を開く
       <input id="fileInput" type="file" accept="image/*" />
     </label>
+
+    <div class="motion-panel">
+      <button id="motionBtn" type="button" aria-pressed="false">モーション開始</button>
+      <div id="motionStatus" class="motion-status" aria-live="polite" hidden></div>
+    </div>
 
     <button id="resetBtn">視点をリセット</button>
     <button id="fullscreenBtn">全画面</button>

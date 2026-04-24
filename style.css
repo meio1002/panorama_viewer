@@ -52,12 +52,51 @@ button,
   backdrop-filter: blur(8px);
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: .56;
+}
+
 button:hover,
 .upload:hover {
   background: rgba(255,255,255,.18);
 }
 
 .upload input {
+  display: none;
+}
+
+.motion-panel {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+#motionBtn.is-active {
+  border-color: rgba(73,255,188,.7);
+  background: rgba(0,94,71,.68);
+}
+
+.motion-status {
+  min-width: 0;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: 999px;
+  background: rgba(0,0,0,.34);
+  color: rgba(255,255,255,.92);
+  padding: 7px 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  text-shadow: 0 1px 6px rgba(0,0,0,.6);
+  backdrop-filter: blur(8px);
+}
+
+.motion-status.is-error {
+  border-color: rgba(255,186,112,.55);
+  color: #ffe1b8;
+}
+
+.motion-status[hidden] {
   display: none;
 }
 
@@ -70,5 +109,14 @@ button:hover,
 
   .hint {
     display: none;
+  }
+
+  .motion-panel {
+    display: flex;
+    flex-wrap: wrap;
+  }
+
+  .motion-status {
+    flex: 1 1 170px;
   }
 }
