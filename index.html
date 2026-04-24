@@ -11,7 +11,7 @@
 
   <div id="ui">
     <div class="title">360° Panorama Viewer</div>
-    <div class="hint">ドラッグで視点移動 / ホイールでズーム / スマホはモーション操作対応</div>
+    <div class="hint">ドラッグで視点移動 / ホイールでズーム / スマホVRゴーグル対応</div>
 
     <label class="upload">
       パノラマ画像を開く
@@ -20,11 +20,17 @@
 
     <div class="motion-panel">
       <button id="motionBtn" type="button" aria-pressed="false">モーション開始</button>
+      <button id="vrBtn" type="button" aria-pressed="false">VRゴーグル</button>
       <div id="motionStatus" class="motion-status" aria-live="polite" hidden></div>
     </div>
 
     <button id="resetBtn">視点をリセット</button>
     <button id="fullscreenBtn">全画面</button>
+  </div>
+
+  <div id="vrHud" hidden>
+    <div id="vrMessage" class="vr-message" aria-live="polite">横向きにしてゴーグルへ</div>
+    <button id="exitVrBtn" type="button">VR終了</button>
   </div>
 
   <script type="importmap">

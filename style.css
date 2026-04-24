@@ -8,8 +8,11 @@ html, body {
 }
 
 #viewer {
+  position: fixed;
+  inset: 0;
   width: 100vw;
   height: 100vh;
+  overflow: hidden;
 }
 
 #ui {
@@ -78,6 +81,11 @@ button:hover,
   background: rgba(0,94,71,.68);
 }
 
+#vrBtn.is-active {
+  border-color: rgba(124,208,255,.78);
+  background: rgba(0,65,104,.7);
+}
+
 .motion-status {
   min-width: 0;
   border: 1px solid rgba(255,255,255,.18);
@@ -100,6 +108,62 @@ button:hover,
   display: none;
 }
 
+#vrHud {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: 10px;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  pointer-events: none;
+}
+
+#vrHud[hidden] {
+  display: none;
+}
+
+.vr-message {
+  border: 1px solid rgba(255,255,255,.28);
+  border-radius: 999px;
+  background: rgba(0,0,0,.42);
+  color: white;
+  padding: 7px 11px;
+  font-size: 12px;
+  line-height: 1.35;
+  text-shadow: 0 1px 6px rgba(0,0,0,.65);
+  backdrop-filter: blur(8px);
+}
+
+.vr-message.is-error {
+  border-color: rgba(255,186,112,.58);
+  color: #ffe1b8;
+}
+
+#exitVrBtn {
+  pointer-events: auto;
+}
+
+body.is-vr #ui {
+  display: none;
+}
+
+body.is-vr #viewer::after {
+  content: "";
+  position: fixed;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  z-index: 8;
+  background: rgba(255,255,255,.32);
+  transform: translateX(-.5px);
+  pointer-events: none;
+}
+
 @media (max-width: 640px) {
   #ui {
     left: 12px;
@@ -118,5 +182,12 @@ button:hover,
 
   .motion-status {
     flex: 1 1 170px;
+  }
+}
+
+@media (pointer: coarse) {
+  .motion-panel {
+    display: flex;
+    flex-wrap: wrap;
   }
 }

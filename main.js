@@ -5,6 +5,10 @@ const container = document.getElementById("viewer");
 const fileInput = document.getElementById("fileInput");
 const motionBtn = document.getElementById("motionBtn");
 const motionStatus = document.getElementById("motionStatus");
+const vrBtn = document.getElementById("vrBtn");
+const vrHud = document.getElementById("vrHud");
+const vrMessage = document.getElementById("vrMessage");
+const exitVrBtn = document.getElementById("exitVrBtn");
 const resetBtn = document.getElementById("resetBtn");
 const fullscreenBtn = document.getElementById("fullscreenBtn");
 
@@ -21,6 +25,7 @@ const deviceTransformQuaternion = new THREE.Quaternion(
 const motionCalibrationQuaternion = new THREE.Quaternion();
 const calibratedCameraQuaternion = new THREE.Quaternion();
 const forwardDirection = new THREE.Vector3();
+const stereoCamera = new THREE.StereoCamera();
 
 let scene;
 let camera;
@@ -33,6 +38,9 @@ let motionEnabled = false;
 let hasMotionSample = false;
 let screenOrientation = 0;
 let sensorWaitTimer = 0;
+let vrModeEnabled = false;
+let motionWasEnabledBeforeVr = false;
+let fovBeforeVr = 75;
 
 init();
 loadPanorama("./assets/panorama.jpeg");
@@ -58,7 +66,10 @@ function init() {
 
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.autoClear = false;
   container.appendChild(renderer.domElement);
+
+  stereoCamera.eyeSep = 0.064;
 
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
@@ -78,6 +89,8 @@ function init() {
 
   fileInput.addEventListener("change", onFileSelected);
   motionBtn.addEventListener("click", toggleMotionTracking);
+  vrBtn.addEventListener("click", toggleVrMode);
+  exitVrBtn.addEventListener("click", exitVrMode);
   resetBtn.addEventListener("click", resetView);
   fullscreenBtn.addEventListener("click", toggleFullscreen);
 
@@ -176,7 +189,7 @@ function onMouseWheel(event) {
 }
 
 function resetView() {
-  camera.fov = 75;
+  camera.fov = vrModeEnabled ? 80 : 75;
   camera.updateProjectionMatrix();
 
   if (motionEnabled) {
@@ -199,14 +212,18 @@ async function toggleMotionTracking() {
 }
 
 async function startMotionTracking() {
+  if (motionEnabled) {
+    return true;
+  }
+
   if (!canUseDeviceOrientation()) {
     setMotionStatus("この端末ではモーション操作を利用できません。", true);
-    return;
+    return false;
   }
 
   if (!window.isSecureContext) {
     setMotionStatus("モーション操作にはHTTPSまたはlocalhostが必要です。", true);
-    return;
+    return false;
   }
 
   try {
@@ -217,13 +234,13 @@ async function startMotionTracking() {
 
       if (permission !== "granted") {
         setMotionStatus("センサー利用が許可されませんでした。", true);
-        return;
+        return false;
       }
     }
   } catch (error) {
     console.error("モーション操作の権限確認に失敗しました:", error);
     setMotionStatus("センサー利用を開始できませんでした。", true);
-    return;
+    return false;
   }
 
   latestOrientation = null;
@@ -240,6 +257,8 @@ async function startMotionTracking() {
       setMotionStatus("センサー値を取得できません。ドラッグ操作に戻せます。", true);
     }
   }, 2200);
+
+  return true;
 }
 
 function stopMotionTracking(message = "") {
@@ -337,6 +356,10 @@ function setMotionStatus(message, isError = false) {
   motionStatus.textContent = message;
   motionStatus.hidden = message === "";
   motionStatus.classList.toggle("is-error", isError);
+
+  if (vrModeEnabled && message) {
+    setVrMessage(message, isError);
+  }
 }
 
 function onScreenOrientationChange() {
@@ -365,6 +388,87 @@ function syncOrbitControlsToCamera() {
   controls.update();
 }
 
+async function toggleVrMode() {
+  if (vrModeEnabled) {
+    exitVrMode();
+    return;
+  }
+
+  await enterVrMode();
+}
+
+async function enterVrMode() {
+  vrModeEnabled = true;
+  motionWasEnabledBeforeVr = motionEnabled;
+  fovBeforeVr = camera.fov;
+
+  camera.fov = 80;
+  updateCameraProjection();
+  document.body.classList.add("is-vr");
+  vrHud.hidden = false;
+  setVrButtonState(true);
+  setVrMessage("横向きにしてゴーグルへ");
+
+  requestVrPresentation();
+
+  if (!motionEnabled) {
+    const started = await startMotionTracking();
+
+    if (!started) {
+      setVrMessage("分割表示中です。視点操作にはセンサー許可が必要です。", true);
+    }
+  }
+}
+
+function exitVrMode() {
+  if (!vrModeEnabled) {
+    return;
+  }
+
+  vrModeEnabled = false;
+  camera.fov = fovBeforeVr;
+  updateCameraProjection();
+  document.body.classList.remove("is-vr");
+  vrHud.hidden = true;
+  setVrButtonState(false);
+  screen.orientation?.unlock?.();
+
+  if (document.fullscreenElement) {
+    const exitPromise = document.exitFullscreen?.();
+    exitPromise?.catch?.(() => {});
+  }
+
+  if (!motionWasEnabledBeforeVr && motionEnabled) {
+    stopMotionTracking("VR表示を終了しました。");
+  } else {
+    setMotionStatus("VR表示を終了しました。");
+  }
+}
+
+function setVrButtonState(isActive) {
+  vrBtn.textContent = isActive ? "VR終了" : "VRゴーグル";
+  vrBtn.classList.toggle("is-active", isActive);
+  vrBtn.setAttribute("aria-pressed", String(isActive));
+}
+
+function setVrMessage(message, isError = false) {
+  vrMessage.textContent = message;
+  vrMessage.classList.toggle("is-error", isError);
+}
+
+function requestVrPresentation() {
+  const fullscreenPromise = document.fullscreenElement
+    ? Promise.resolve()
+    : document.documentElement.requestFullscreen?.();
+
+  fullscreenPromise
+    ?.then(() => {
+      const lockPromise = screen.orientation?.lock?.("landscape");
+      lockPromise?.catch?.(() => {});
+    })
+    .catch(() => {});
+}
+
 function toggleFullscreen() {
   if (!document.fullscreenElement) {
     document.documentElement.requestFullscreen?.();
@@ -374,10 +478,15 @@ function toggleFullscreen() {
 }
 
 function onResize() {
-  camera.aspect = window.innerWidth / window.innerHeight;
-  camera.updateProjectionMatrix();
-
   renderer.setSize(window.innerWidth, window.innerHeight);
+  updateCameraProjection();
+}
+
+function updateCameraProjection() {
+  const viewWidth = vrModeEnabled ? window.innerWidth / 2 : window.innerWidth;
+
+  camera.aspect = viewWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
 }
 
 function animate() {
@@ -389,5 +498,36 @@ function animate() {
     controls.update();
   }
 
-  renderer.render(scene, camera);
+  renderScene();
+}
+
+function renderScene() {
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+
+  if (!vrModeEnabled) {
+    renderer.setScissorTest(false);
+    renderer.setViewport(0, 0, width, height);
+    renderer.clear();
+    renderer.render(scene, camera);
+    return;
+  }
+
+  const halfWidth = Math.floor(width / 2);
+
+  camera.updateMatrixWorld();
+  stereoCamera.update(camera);
+  renderer.setScissorTest(true);
+
+  renderer.setViewport(0, 0, halfWidth, height);
+  renderer.setScissor(0, 0, halfWidth, height);
+  renderer.clear();
+  renderer.render(scene, stereoCamera.cameraL);
+
+  renderer.setViewport(halfWidth, 0, width - halfWidth, height);
+  renderer.setScissor(halfWidth, 0, width - halfWidth, height);
+  renderer.clear();
+  renderer.render(scene, stereoCamera.cameraR);
+
+  renderer.setScissorTest(false);
 }
