@@ -26,6 +26,8 @@ const motionCalibrationQuaternion = new THREE.Quaternion();
 const calibratedCameraQuaternion = new THREE.Quaternion();
 const forwardDirection = new THREE.Vector3();
 const stereoCamera = new THREE.StereoCamera();
+const MOTION_CALIBRATION_SAMPLES = 4;
+const MOTION_CALIBRATION_SETTLE_DELAY = 450;
 
 let scene;
 let camera;
@@ -38,6 +40,10 @@ let motionEnabled = false;
 let hasMotionSample = false;
 let screenOrientation = 0;
 let sensorWaitTimer = 0;
+let motionCalibrationPending = false;
+let motionCalibrationSampleCount = 0;
+let motionCalibrationReadyAt = 0;
+let motionCalibrationCompleteMessage = "モーション操作中です。";
 let vrModeEnabled = false;
 let motionWasEnabledBeforeVr = false;
 let fovBeforeVr = 75;
@@ -251,6 +257,14 @@ async function startMotionTracking() {
   setMotionStatus("センサー待機中です。端末を少し動かしてください。");
 
   window.addEventListener("deviceorientation", onDeviceOrientation);
+  requestMotionCalibration(
+    vrModeEnabled
+      ? "横向きで正面を合わせています。端末を止めてください。"
+      : "正面を合わせています。端末を止めてください。",
+    "モーション操作中です。",
+    vrModeEnabled ? MOTION_CALIBRATION_SETTLE_DELAY : 0
+  );
+
   clearTimeout(sensorWaitTimer);
   sensorWaitTimer = window.setTimeout(() => {
     if (motionEnabled && !hasMotionSample) {
@@ -265,6 +279,8 @@ function stopMotionTracking(message = "") {
   motionEnabled = false;
   hasMotionSample = false;
   latestOrientation = null;
+  motionCalibrationPending = false;
+  motionCalibrationSampleCount = 0;
   controls.enabled = true;
   clearTimeout(sensorWaitTimer);
   window.removeEventListener("deviceorientation", onDeviceOrientation);
@@ -275,6 +291,7 @@ function stopMotionTracking(message = "") {
 
 function onDeviceOrientation(event) {
   latestOrientation = event;
+  screenOrientation = getScreenOrientation();
 
   if (!isUsableOrientation(event)) {
     return;
@@ -282,9 +299,9 @@ function onDeviceOrientation(event) {
 
   if (!hasMotionSample) {
     hasMotionSample = true;
-    calibrateMotionView();
-    setMotionStatus("モーション操作中です。");
   }
+
+  updatePendingMotionCalibration();
 }
 
 function calibrateMotionView() {
@@ -293,20 +310,60 @@ function calibrateMotionView() {
     return;
   }
 
+  requestMotionCalibration(
+    "正面を合わせています。端末を止めてください。",
+    "モーション操作中です。"
+  );
+}
+
+function requestMotionCalibration(message, completeMessage, delay = 0) {
+  motionCalibrationPending = true;
+  motionCalibrationSampleCount = 0;
+  motionCalibrationReadyAt = performance.now() + delay;
+  motionCalibrationCompleteMessage = completeMessage;
+  setMotionStatus(message);
+}
+
+function updatePendingMotionCalibration() {
+  if (!motionCalibrationPending || !isUsableOrientation(latestOrientation)) {
+    return;
+  }
+
+  if (performance.now() < motionCalibrationReadyAt) {
+    return;
+  }
+
+  motionCalibrationSampleCount += 1;
+
+  if (motionCalibrationSampleCount < MOTION_CALIBRATION_SAMPLES) {
+    return;
+  }
+
+  motionCalibrationPending = false;
+  motionCalibrationSampleCount = 0;
+  calibrateMotionViewNow();
+  setMotionStatus(motionCalibrationCompleteMessage);
+}
+
+function calibrateMotionViewNow() {
   setDeviceQuaternion(deviceQuaternion, latestOrientation);
   motionCalibrationQuaternion.copy(deviceQuaternion).invert();
   updateCameraFromDeviceOrientation();
 }
 
 function updateCameraFromDeviceOrientation() {
-  if (!motionEnabled || !isUsableOrientation(latestOrientation)) {
+  if (
+    !motionEnabled ||
+    motionCalibrationPending ||
+    !isUsableOrientation(latestOrientation)
+  ) {
     return;
   }
 
   setDeviceQuaternion(deviceQuaternion, latestOrientation);
   calibratedCameraQuaternion.multiplyQuaternions(
-    deviceQuaternion,
-    motionCalibrationQuaternion
+    motionCalibrationQuaternion,
+    deviceQuaternion
   );
   camera.quaternion.copy(calibratedCameraQuaternion);
   camera.position.set(0, 0, 0.1);
@@ -365,8 +422,14 @@ function setMotionStatus(message, isError = false) {
 function onScreenOrientationChange() {
   screenOrientation = getScreenOrientation();
 
-  if (motionEnabled && hasMotionSample) {
-    calibrateMotionView();
+  if (motionEnabled) {
+    requestMotionCalibration(
+      vrModeEnabled
+        ? "横向きに合わせています。端末を止めてください。"
+        : "画面向きに合わせています。端末を止めてください。",
+      "モーション操作中です。",
+      MOTION_CALIBRATION_SETTLE_DELAY
+    );
   }
 }
 
@@ -417,6 +480,12 @@ async function enterVrMode() {
     if (!started) {
       setVrMessage("分割表示中です。視点操作にはセンサー許可が必要です。", true);
     }
+  } else {
+    requestMotionCalibration(
+      "横向きで正面を合わせています。端末を止めてください。",
+      "モーション操作中です。",
+      MOTION_CALIBRATION_SETTLE_DELAY
+    );
   }
 }
 
