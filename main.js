@@ -26,8 +26,19 @@ const motionCalibrationQuaternion = new THREE.Quaternion();
 const calibratedCameraQuaternion = new THREE.Quaternion();
 const forwardDirection = new THREE.Vector3();
 const stereoCamera = new THREE.StereoCamera();
+const gazeRaycaster = new THREE.Raycaster();
+const gazeOrigin = new THREE.Vector3();
+const gazeDirection = new THREE.Vector3();
 const MOTION_CALIBRATION_SAMPLES = 4;
 const MOTION_CALIBRATION_SETTLE_DELAY = 450;
+const VR_MENU_DISTANCE = 4;
+const VR_RETICLE_DISTANCE = 2.6;
+const VR_GAZE_SELECT_DURATION = 1000;
+const VR_MENU_OPEN_DURATION = 800;
+const VR_MENU_OPEN_DOWN_Y = -0.55;
+const VR_MENU_COOLDOWN = 700;
+const VR_MENU_ITEM_WIDTH = 2.35;
+const VR_MENU_ITEM_HEIGHT = 0.48;
 
 let scene;
 let camera;
@@ -47,6 +58,17 @@ let motionCalibrationCompleteMessage = "モーション操作中です。";
 let vrModeEnabled = false;
 let motionWasEnabledBeforeVr = false;
 let fovBeforeVr = 75;
+let vrMenuGroup;
+let vrReticleGroup;
+let vrReticleDot;
+let vrReticleRing;
+let vrMenuItems = [];
+let vrMenuVisible = false;
+let gazeTarget = null;
+let gazeTargetStartedAt = 0;
+let lookDownStartedAt = 0;
+let vrMenuGestureCooldownUntil = 0;
+let gazeActionCooldownUntil = 0;
 
 init();
 loadPanorama("./assets/panorama.jpeg");
@@ -76,6 +98,7 @@ function init() {
   container.appendChild(renderer.domElement);
 
   stereoCamera.eyeSep = 0.064;
+  createVrHandsFreeControls();
 
   controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
@@ -451,6 +474,331 @@ function syncOrbitControlsToCamera() {
   controls.update();
 }
 
+function createVrHandsFreeControls() {
+  vrMenuGroup = new THREE.Group();
+  vrMenuGroup.visible = false;
+
+  const background = new THREE.Mesh(
+    new THREE.PlaneGeometry(2.75, 2.2),
+    new THREE.MeshBasicMaterial({
+      color: 0x05090d,
+      transparent: true,
+      opacity: 0.64,
+      depthTest: false,
+      depthWrite: false
+    })
+  );
+  background.position.z = -0.04;
+  background.renderOrder = 10;
+  vrMenuGroup.add(background);
+
+  const title = createVrLabelMesh("視線メニュー", 1.9, 0.32, "#ffffff", 68);
+  title.position.set(0, 0.88, 0.02);
+  vrMenuGroup.add(title);
+
+  vrMenuItems = [
+    createVrMenuItem("正面リセット", "reset", 0.38),
+    createVrMenuItem("メニューを閉じる", "close", -0.2),
+    createVrMenuItem("VR終了", "exit", -0.78)
+  ];
+
+  vrMenuItems.forEach((item) => {
+    vrMenuGroup.add(item);
+  });
+
+  scene.add(vrMenuGroup);
+
+  vrReticleGroup = new THREE.Group();
+  vrReticleGroup.visible = false;
+
+  vrReticleRing = new THREE.Mesh(
+    new THREE.RingGeometry(0.035, 0.046, 36),
+    new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.82,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    })
+  );
+  vrReticleRing.renderOrder = 30;
+
+  vrReticleDot = new THREE.Mesh(
+    new THREE.CircleGeometry(0.013, 24),
+    new THREE.MeshBasicMaterial({
+      color: 0x7cd0ff,
+      transparent: true,
+      opacity: 0.42,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    })
+  );
+  vrReticleDot.position.z = 0.002;
+  vrReticleDot.renderOrder = 31;
+
+  vrReticleGroup.add(vrReticleRing, vrReticleDot);
+  scene.add(vrReticleGroup);
+}
+
+function createVrMenuItem(label, action, y) {
+  const item = new THREE.Mesh(
+    new THREE.PlaneGeometry(VR_MENU_ITEM_WIDTH, VR_MENU_ITEM_HEIGHT),
+    new THREE.MeshBasicMaterial({
+      color: 0x101820,
+      transparent: true,
+      opacity: 0.82,
+      depthTest: false,
+      depthWrite: false,
+      side: THREE.DoubleSide
+    })
+  );
+  item.position.set(0, y, 0);
+  item.renderOrder = 12;
+  item.userData.action = action;
+  item.userData.label = label;
+
+  const labelMesh = createVrLabelMesh(label, 1.9, 0.26, "#ffffff", 70);
+  labelMesh.position.z = 0.018;
+  item.add(labelMesh);
+
+  const progressBar = new THREE.Mesh(
+    new THREE.PlaneGeometry(1, 0.035),
+    new THREE.MeshBasicMaterial({
+      color: 0x7cd0ff,
+      transparent: true,
+      opacity: 0.9,
+      depthTest: false,
+      depthWrite: false
+    })
+  );
+  progressBar.visible = false;
+  progressBar.position.set(-VR_MENU_ITEM_WIDTH / 2 + 0.12, -0.18, 0.02);
+  progressBar.renderOrder = 14;
+  item.add(progressBar);
+  item.userData.progressBar = progressBar;
+
+  return item;
+}
+
+function createVrLabelMesh(text, width, height, color, fontSize) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  canvas.height = 256;
+
+  const context = canvas.getContext("2d");
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = color;
+  context.font = `700 ${fontSize}px system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.fillText(text, canvas.width / 2, canvas.height / 2);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    side: THREE.DoubleSide
+  });
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
+  mesh.renderOrder = 13;
+
+  return mesh;
+}
+
+function enableVrHandsFreeControls() {
+  vrReticleGroup.visible = true;
+  closeVrMenu("下を見るとメニューを開けます。", false);
+  vrMenuGestureCooldownUntil = performance.now() + VR_MENU_COOLDOWN;
+}
+
+function disableVrHandsFreeControls() {
+  vrReticleGroup.visible = false;
+  vrMenuGroup.visible = false;
+  vrMenuVisible = false;
+  lookDownStartedAt = 0;
+  resetGazeSelection();
+}
+
+function updateVrHandsFreeControls(now) {
+  if (!vrModeEnabled) {
+    return;
+  }
+
+  const progress = vrMenuVisible
+    ? updateVrMenuGaze(now)
+    : updateVrMenuOpenGesture(now);
+
+  updateVrReticle(progress, progress > 0);
+}
+
+function updateVrMenuOpenGesture(now) {
+  if (now < vrMenuGestureCooldownUntil || motionCalibrationPending) {
+    lookDownStartedAt = 0;
+    return 0;
+  }
+
+  getCameraForward(gazeDirection);
+
+  if (gazeDirection.y < VR_MENU_OPEN_DOWN_Y) {
+    if (lookDownStartedAt === 0) {
+      lookDownStartedAt = now;
+      setVrMessage("下を見続けるとメニューを開きます。");
+    }
+
+    const progress = Math.min((now - lookDownStartedAt) / VR_MENU_OPEN_DURATION, 1);
+
+    if (progress >= 1) {
+      openVrMenu();
+      return 0;
+    }
+
+    return progress;
+  }
+
+  if (lookDownStartedAt !== 0) {
+    setVrMessage("下を見るとメニューを開けます。");
+  }
+
+  lookDownStartedAt = 0;
+  return 0;
+}
+
+function updateVrMenuGaze(now) {
+  if (now < gazeActionCooldownUntil) {
+    resetGazeSelection();
+    return 0;
+  }
+
+  camera.getWorldPosition(gazeOrigin);
+  getCameraForward(gazeDirection);
+  gazeRaycaster.set(gazeOrigin, gazeDirection);
+  gazeRaycaster.far = VR_MENU_DISTANCE + 2;
+
+  const intersections = gazeRaycaster.intersectObjects(vrMenuItems, false);
+  const target = intersections[0]?.object ?? null;
+
+  if (target !== gazeTarget) {
+    gazeTarget = target;
+    gazeTargetStartedAt = target ? now : 0;
+    setVrMessage(target ? `${target.userData.label} を見続けて選択` : "項目を見続けると選択します。");
+  }
+
+  const progress = target
+    ? Math.min((now - gazeTargetStartedAt) / VR_GAZE_SELECT_DURATION, 1)
+    : 0;
+
+  updateVrMenuItemVisuals(target, progress);
+
+  if (target && progress >= 1) {
+    executeVrMenuAction(target.userData.action);
+    gazeActionCooldownUntil = now + VR_MENU_COOLDOWN;
+    return 0;
+  }
+
+  return progress;
+}
+
+function openVrMenu() {
+  positionVrMenuInFront();
+  vrMenuVisible = true;
+  vrMenuGroup.visible = true;
+  lookDownStartedAt = 0;
+  resetGazeSelection();
+  setVrMessage("項目を見続けると選択します。");
+}
+
+function closeVrMenu(message = "下を見るとメニューを開けます。", useCooldown = true) {
+  vrMenuVisible = false;
+  vrMenuGroup.visible = false;
+  lookDownStartedAt = 0;
+  resetGazeSelection();
+
+  if (useCooldown) {
+    vrMenuGestureCooldownUntil = performance.now() + VR_MENU_COOLDOWN;
+  }
+
+  if (vrModeEnabled) {
+    setVrMessage(message);
+  }
+}
+
+function positionVrMenuInFront() {
+  camera.getWorldPosition(gazeOrigin);
+  getCameraForward(gazeDirection);
+  vrMenuGroup.position.copy(gazeOrigin).addScaledVector(gazeDirection, VR_MENU_DISTANCE);
+  vrMenuGroup.quaternion.copy(camera.quaternion);
+}
+
+function updateVrReticle(progress, isActive) {
+  camera.getWorldPosition(gazeOrigin);
+  getCameraForward(gazeDirection);
+  vrReticleGroup.position.copy(gazeOrigin).addScaledVector(gazeDirection, VR_RETICLE_DISTANCE);
+  vrReticleGroup.quaternion.copy(camera.quaternion);
+
+  const scale = 1 + progress * 0.55;
+  vrReticleRing.scale.setScalar(scale);
+  vrReticleDot.scale.setScalar(1 + progress * 2.2);
+  vrReticleRing.material.color.setHex(isActive ? 0x7cd0ff : 0xffffff);
+  vrReticleDot.material.opacity = 0.38 + progress * 0.46;
+}
+
+function updateVrMenuItemVisuals(activeItem, progress) {
+  vrMenuItems.forEach((item) => {
+    const isActive = item === activeItem;
+    const itemProgress = isActive ? progress : 0;
+    const progressBar = item.userData.progressBar;
+    const progressWidth = (VR_MENU_ITEM_WIDTH - 0.24) * itemProgress;
+
+    item.material.color.setHex(isActive ? 0x17496a : 0x101820);
+    item.material.opacity = isActive ? 0.95 : 0.82;
+    item.scale.set(isActive ? 1.04 : 1, isActive ? 1.04 : 1, 1);
+
+    progressBar.visible = itemProgress > 0;
+    progressBar.scale.x = Math.max(progressWidth, 0.001);
+    progressBar.position.x = -VR_MENU_ITEM_WIDTH / 2 + 0.12 + progressWidth / 2;
+  });
+}
+
+function resetGazeSelection() {
+  gazeTarget = null;
+  gazeTargetStartedAt = 0;
+  updateVrMenuItemVisuals(null, 0);
+}
+
+function executeVrMenuAction(action) {
+  if (action === "reset") {
+    if (motionEnabled) {
+      calibrateMotionView();
+      closeVrMenu("正面を合わせています。端末を止めてください。");
+    } else {
+      resetView();
+      closeVrMenu("正面を合わせました。下を見るとメニューを開けます。");
+    }
+    return;
+  }
+
+  if (action === "close") {
+    closeVrMenu();
+    return;
+  }
+
+  if (action === "exit") {
+    exitVrMode();
+  }
+}
+
+function getCameraForward(target) {
+  return target.set(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+}
+
 async function toggleVrMode() {
   if (vrModeEnabled) {
     exitVrMode();
@@ -470,7 +818,8 @@ async function enterVrMode() {
   document.body.classList.add("is-vr");
   vrHud.hidden = false;
   setVrButtonState(true);
-  setVrMessage("横向きにしてゴーグルへ");
+  enableVrHandsFreeControls();
+  setVrMessage("下を見るとメニューを開けます。");
 
   requestVrPresentation();
 
@@ -498,6 +847,7 @@ function exitVrMode() {
   camera.fov = fovBeforeVr;
   updateCameraProjection();
   document.body.classList.remove("is-vr");
+  disableVrHandsFreeControls();
   vrHud.hidden = true;
   setVrButtonState(false);
   screen.orientation?.unlock?.();
@@ -567,6 +917,7 @@ function animate() {
     controls.update();
   }
 
+  updateVrHandsFreeControls(performance.now());
   renderScene();
 }
 

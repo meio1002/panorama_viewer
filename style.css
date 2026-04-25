@@ -110,20 +110,25 @@ button:hover,
 
 #vrHud {
   position: fixed;
-  left: 0;
-  right: 0;
-  top: 10px;
+  inset: 0;
   z-index: 20;
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 8px;
-  padding: 0 12px;
   pointer-events: none;
 }
 
 #vrHud[hidden] {
   display: none;
+}
+
+.vr-status {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  max-width: calc(100vw - 24px);
+  transform: translateX(-50%);
 }
 
 .vr-message {
@@ -145,6 +150,7 @@ button:hover,
 
 #exitVrBtn {
   pointer-events: auto;
+  white-space: nowrap;
 }
 
 body.is-vr #ui {
