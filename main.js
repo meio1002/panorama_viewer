@@ -878,14 +878,84 @@ function setVrMessage(message, isError = false) {
 function requestVrPresentation() {
   const fullscreenPromise = document.fullscreenElement
     ? Promise.resolve()
-    : document.documentElement.requestFullscreen?.();
+    : document.documentElement.requestFullscreen?.() ?? Promise.resolve();
 
   fullscreenPromise
-    ?.then(() => {
-      const lockPromise = screen.orientation?.lock?.("landscape");
-      lockPromise?.catch?.(() => {});
+    ?.then(async () => {
+      const lockType = await lockVrLandscapeOrientation();
+
+      screenOrientation = getScreenOrientation();
+
+      if (motionEnabled) {
+        requestMotionCalibration(
+          "横向きで正面を合わせています。端末を止めてください。",
+          "モーション操作中です。",
+          MOTION_CALIBRATION_SETTLE_DELAY
+        );
+      }
+
+      if (!lockType && vrModeEnabled) {
+        setVrMessage("横向き固定に対応していません。端末を横向きにしてください。", true);
+      }
     })
-    .catch(() => {});
+    .catch(() => {
+      if (vrModeEnabled) {
+        setVrMessage("横向き固定を開始できませんでした。端末を横向きにしてください。", true);
+      }
+    });
+}
+
+async function lockVrLandscapeOrientation() {
+  if (typeof screen.orientation?.lock !== "function") {
+    return "";
+  }
+
+  const preferredType = getPreferredLandscapeLockType();
+  const lockTypes = [
+    preferredType,
+    "landscape-primary",
+    "landscape-secondary",
+    "landscape"
+  ].filter((type, index, items) => type && items.indexOf(type) === index);
+
+  for (const lockType of lockTypes) {
+    try {
+      await screen.orientation.lock(lockType);
+      return lockType;
+    } catch (error) {
+      console.warn(`${lockType} への画面向き固定に失敗しました:`, error);
+    }
+  }
+
+  return "";
+}
+
+function getPreferredLandscapeLockType() {
+  const orientationType = screen.orientation?.type;
+
+  if (orientationType === "landscape-primary" || orientationType === "landscape-secondary") {
+    return orientationType;
+  }
+
+  const angle = getNormalizedScreenAngle();
+
+  if (angle === 270) {
+    return "landscape-secondary";
+  }
+
+  return "landscape-primary";
+}
+
+function getNormalizedScreenAngle() {
+  const rawAngle = typeof screen.orientation?.angle === "number"
+    ? screen.orientation.angle
+    : window.orientation;
+
+  if (typeof rawAngle !== "number") {
+    return 0;
+  }
+
+  return ((rawAngle % 360) + 360) % 360;
 }
 
 function toggleFullscreen() {
