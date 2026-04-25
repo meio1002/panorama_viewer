@@ -15,6 +15,10 @@ html, body {
   overflow: hidden;
 }
 
+#viewer canvas {
+  display: block;
+}
+
 #ui {
   position: fixed;
   left: 16px;
@@ -70,10 +74,14 @@ button:hover,
 }
 
 .motion-panel {
-  display: none;
+  display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
+}
+
+#motionBtn,
+.motion-status {
+  display: none;
 }
 
 #motionBtn.is-active {
@@ -170,6 +178,48 @@ body.is-vr #viewer::after {
   pointer-events: none;
 }
 
+body.is-virtual-landscape #viewer canvas {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100vh !important;
+  height: 100vw !important;
+  transform: rotate(90deg) translateY(-100%);
+  transform-origin: top left;
+}
+
+body.is-virtual-landscape.is-virtual-landscape-flipped #viewer canvas {
+  transform: rotate(-90deg) translateX(-100%);
+}
+
+body.is-virtual-landscape #viewer::after {
+  left: 0;
+  right: 0;
+  top: 50%;
+  bottom: auto;
+  width: auto;
+  height: 1px;
+  transform: translateY(-.5px);
+}
+
+body.is-virtual-landscape #vrHud {
+  inset: auto;
+  left: 0;
+  top: 0;
+  width: 100vh;
+  height: 100vw;
+  transform: rotate(90deg) translateY(-100%);
+  transform-origin: top left;
+}
+
+body.is-virtual-landscape.is-virtual-landscape-flipped #vrHud {
+  transform: rotate(-90deg) translateX(-100%);
+}
+
+body.is-virtual-landscape .vr-status {
+  max-width: calc(100vh - 24px);
+}
+
 @media (max-width: 640px) {
   #ui {
     left: 12px;
@@ -182,8 +232,17 @@ body.is-vr #viewer::after {
   }
 
   .motion-panel {
-    display: flex;
     flex-wrap: wrap;
+    width: 100%;
+  }
+
+  #motionBtn,
+  .motion-status {
+    display: block;
+  }
+
+  .motion-status[hidden] {
+    display: none;
   }
 
   .motion-status {
@@ -193,7 +252,16 @@ body.is-vr #viewer::after {
 
 @media (pointer: coarse) {
   .motion-panel {
-    display: flex;
     flex-wrap: wrap;
+    width: 100%;
+  }
+
+  #motionBtn,
+  .motion-status {
+    display: block;
+  }
+
+  .motion-status[hidden] {
+    display: none;
   }
 }

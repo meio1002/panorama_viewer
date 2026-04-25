@@ -39,6 +39,9 @@ const VR_MENU_OPEN_DOWN_Y = -0.55;
 const VR_MENU_COOLDOWN = 700;
 const VR_MENU_ITEM_WIDTH = 2.35;
 const VR_MENU_ITEM_HEIGHT = 0.48;
+const VIRTUAL_LANDSCAPE_CHECK_DELAY = 600;
+const VIRTUAL_LANDSCAPE_DEFAULT_ANGLE = 90;
+const VIRTUAL_LANDSCAPE_FLIPPED_ANGLE = 270;
 
 let scene;
 let camera;
@@ -58,6 +61,9 @@ let motionCalibrationCompleteMessage = "モーション操作中です。";
 let vrModeEnabled = false;
 let motionWasEnabledBeforeVr = false;
 let fovBeforeVr = 75;
+let virtualLandscapeEnabled = false;
+let virtualLandscapeAngleDeg = VIRTUAL_LANDSCAPE_DEFAULT_ANGLE;
+let virtualLandscapeTimer = 0;
 let vrMenuGroup;
 let vrReticleGroup;
 let vrReticleDot;
@@ -76,10 +82,11 @@ animate();
 
 function init() {
   scene = new THREE.Scene();
+  const renderSize = getRenderSize();
 
   camera = new THREE.PerspectiveCamera(
     75,
-    window.innerWidth / window.innerHeight,
+    renderSize.width / renderSize.height,
     0.1,
     2000
   );
@@ -93,7 +100,7 @@ function init() {
   });
 
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setSize(renderSize.width, renderSize.height);
   renderer.autoClear = false;
   container.appendChild(renderer.domElement);
 
@@ -219,7 +226,7 @@ function onMouseWheel(event) {
 
 function resetView() {
   camera.fov = vrModeEnabled ? 80 : 75;
-  camera.updateProjectionMatrix();
+  updateCameraProjection();
 
   if (motionEnabled) {
     calibrateMotionView();
@@ -402,7 +409,9 @@ function setDeviceQuaternion(quaternion, orientation) {
   deviceEuler.set(beta, alpha, -gamma, "YXZ");
   quaternion.setFromEuler(deviceEuler);
   quaternion.multiply(deviceTransformQuaternion);
-  quaternion.multiply(screenQuaternion.setFromAxisAngle(zee, -screenOrientation));
+  quaternion.multiply(
+    screenQuaternion.setFromAxisAngle(zee, -getEffectiveScreenOrientation())
+  );
 }
 
 function isUsableOrientation(orientation) {
@@ -445,6 +454,10 @@ function setMotionStatus(message, isError = false) {
 function onScreenOrientationChange() {
   screenOrientation = getScreenOrientation();
 
+  if (vrModeEnabled) {
+    scheduleVirtualLandscapeCheck(250);
+  }
+
   if (motionEnabled) {
     requestMotionCalibration(
       vrModeEnabled
@@ -468,6 +481,139 @@ function getScreenOrientation() {
   return 0;
 }
 
+function getEffectiveScreenOrientation() {
+  return virtualLandscapeEnabled
+    ? THREE.MathUtils.degToRad(virtualLandscapeAngleDeg)
+    : screenOrientation;
+}
+
+function getRenderSize() {
+  const width = Math.max(1, window.innerWidth);
+  const height = Math.max(1, window.innerHeight);
+
+  if (virtualLandscapeEnabled) {
+    return {
+      width: height,
+      height: width
+    };
+  }
+
+  return { width, height };
+}
+
+function resizeRendererToView() {
+  if (!renderer || !camera) {
+    return;
+  }
+
+  const renderSize = getRenderSize();
+  renderer.setSize(renderSize.width, renderSize.height);
+  updateCameraProjection();
+}
+
+function shouldUseVirtualLandscape() {
+  return vrModeEnabled && window.innerHeight > window.innerWidth;
+}
+
+function scheduleVirtualLandscapeCheck(delay = VIRTUAL_LANDSCAPE_CHECK_DELAY) {
+  clearVirtualLandscapeTimer();
+
+  if (!vrModeEnabled) {
+    return;
+  }
+
+  virtualLandscapeTimer = window.setTimeout(() => {
+    virtualLandscapeTimer = 0;
+    syncVirtualLandscapeFallback();
+  }, delay);
+}
+
+function clearVirtualLandscapeTimer() {
+  clearTimeout(virtualLandscapeTimer);
+  virtualLandscapeTimer = 0;
+}
+
+function syncVirtualLandscapeFallback() {
+  if (!vrModeEnabled) {
+    setVirtualLandscapeEnabled(false);
+    return;
+  }
+
+  setVirtualLandscapeEnabled(shouldUseVirtualLandscape());
+}
+
+function setVirtualLandscapeEnabled(isEnabled) {
+  if (virtualLandscapeEnabled === isEnabled) {
+    return false;
+  }
+
+  virtualLandscapeEnabled = isEnabled;
+  updateVirtualLandscapeClasses();
+  resizeRendererToView();
+
+  if (!vrModeEnabled) {
+    return true;
+  }
+
+  if (motionEnabled) {
+    requestMotionCalibration(
+      isEnabled
+        ? "仮想横向きで正面を合わせています。端末を止めてください。"
+        : "横向きで正面を合わせています。端末を止めてください。",
+      "モーション操作中です。",
+      MOTION_CALIBRATION_SETTLE_DELAY
+    );
+  } else if (isEnabled) {
+    setVrMessage("仮想横向き表示中です。視点操作にはセンサー許可が必要です。", true);
+  } else {
+    setVrMessage("横向き表示に戻しました。下を見るとメニューを開けます。");
+  }
+
+  return true;
+}
+
+function toggleVirtualLandscapeDirection() {
+  virtualLandscapeAngleDeg = virtualLandscapeAngleDeg === VIRTUAL_LANDSCAPE_DEFAULT_ANGLE
+    ? VIRTUAL_LANDSCAPE_FLIPPED_ANGLE
+    : VIRTUAL_LANDSCAPE_DEFAULT_ANGLE;
+
+  updateVirtualLandscapeClasses();
+  resizeRendererToView();
+
+  if (!virtualLandscapeEnabled) {
+    return false;
+  }
+
+  if (motionEnabled) {
+    requestMotionCalibration(
+      "画面反転に合わせています。端末を止めてください。",
+      "モーション操作中です。",
+      MOTION_CALIBRATION_SETTLE_DELAY
+    );
+  } else {
+    setVrMessage("画面を反転しました。視点操作にはセンサー許可が必要です。", true);
+  }
+
+  return true;
+}
+
+function resetVirtualLandscapeState() {
+  clearVirtualLandscapeTimer();
+  virtualLandscapeEnabled = false;
+  virtualLandscapeAngleDeg = VIRTUAL_LANDSCAPE_DEFAULT_ANGLE;
+  updateVirtualLandscapeClasses();
+  resizeRendererToView();
+}
+
+function updateVirtualLandscapeClasses() {
+  document.body.classList.toggle("is-virtual-landscape", virtualLandscapeEnabled);
+  document.body.classList.toggle(
+    "is-virtual-landscape-flipped",
+    virtualLandscapeEnabled &&
+      virtualLandscapeAngleDeg === VIRTUAL_LANDSCAPE_FLIPPED_ANGLE
+  );
+}
+
 function syncOrbitControlsToCamera() {
   forwardDirection.set(0, 0, -1).applyQuaternion(camera.quaternion);
   controls.target.copy(camera.position).addScaledVector(forwardDirection, 0.1);
@@ -479,7 +625,7 @@ function createVrHandsFreeControls() {
   vrMenuGroup.visible = false;
 
   const background = new THREE.Mesh(
-    new THREE.PlaneGeometry(2.75, 2.2),
+    new THREE.PlaneGeometry(2.85, 2.8),
     new THREE.MeshBasicMaterial({
       color: 0x05090d,
       transparent: true,
@@ -493,13 +639,14 @@ function createVrHandsFreeControls() {
   vrMenuGroup.add(background);
 
   const title = createVrLabelMesh("視線メニュー", 1.9, 0.32, "#ffffff", 68);
-  title.position.set(0, 0.88, 0.02);
+  title.position.set(0, 1.08, 0.02);
   vrMenuGroup.add(title);
 
   vrMenuItems = [
-    createVrMenuItem("正面リセット", "reset", 0.38),
-    createVrMenuItem("メニューを閉じる", "close", -0.2),
-    createVrMenuItem("VR終了", "exit", -0.78)
+    createVrMenuItem("正面リセット", "reset", 0.55),
+    createVrMenuItem("画面を反転", "flip", 0),
+    createVrMenuItem("メニューを閉じる", "close", -0.55),
+    createVrMenuItem("VR終了", "exit", -1.1)
   ];
 
   vrMenuItems.forEach((item) => {
@@ -790,6 +937,21 @@ function executeVrMenuAction(action) {
     return;
   }
 
+  if (action === "flip") {
+    if (!virtualLandscapeEnabled && shouldUseVirtualLandscape()) {
+      setVirtualLandscapeEnabled(true);
+    }
+
+    if (!virtualLandscapeEnabled) {
+      closeVrMenu("画面反転は仮想横向き表示中に使います。");
+      return;
+    }
+
+    toggleVirtualLandscapeDirection();
+    closeVrMenu("画面を反転しました。端末を止めてください。");
+    return;
+  }
+
   if (action === "exit") {
     exitVrMode();
   }
@@ -812,6 +974,7 @@ async function enterVrMode() {
   vrModeEnabled = true;
   motionWasEnabledBeforeVr = motionEnabled;
   fovBeforeVr = camera.fov;
+  clearVirtualLandscapeTimer();
 
   camera.fov = 80;
   updateCameraProjection();
@@ -822,6 +985,7 @@ async function enterVrMode() {
   setVrMessage("下を見るとメニューを開けます。");
 
   requestVrPresentation();
+  scheduleVirtualLandscapeCheck();
 
   if (!motionEnabled) {
     const started = await startMotionTracking();
@@ -847,6 +1011,7 @@ function exitVrMode() {
   camera.fov = fovBeforeVr;
   updateCameraProjection();
   document.body.classList.remove("is-vr");
+  resetVirtualLandscapeState();
   disableVrHandsFreeControls();
   vrHud.hidden = true;
   setVrButtonState(false);
@@ -895,13 +1060,16 @@ function requestVrPresentation() {
       }
 
       if (!lockType && vrModeEnabled) {
-        setVrMessage("横向き固定に対応していません。端末を横向きにしてください。", true);
+        setVrMessage("横向き固定に対応していません。必要なら仮想横向きに切り替えます。", true);
       }
     })
     .catch(() => {
       if (vrModeEnabled) {
-        setVrMessage("横向き固定を開始できませんでした。端末を横向きにしてください。", true);
+        setVrMessage("横向き固定を開始できませんでした。必要なら仮想横向きに切り替えます。", true);
       }
+    })
+    .finally(() => {
+      scheduleVirtualLandscapeCheck();
     });
 }
 
@@ -967,14 +1135,18 @@ function toggleFullscreen() {
 }
 
 function onResize() {
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  updateCameraProjection();
+  if (vrModeEnabled) {
+    syncVirtualLandscapeFallback();
+  }
+
+  resizeRendererToView();
 }
 
 function updateCameraProjection() {
-  const viewWidth = vrModeEnabled ? window.innerWidth / 2 : window.innerWidth;
+  const renderSize = getRenderSize();
+  const viewWidth = vrModeEnabled ? renderSize.width / 2 : renderSize.width;
 
-  camera.aspect = viewWidth / window.innerHeight;
+  camera.aspect = viewWidth / renderSize.height;
   camera.updateProjectionMatrix();
 }
 
@@ -992,8 +1164,7 @@ function animate() {
 }
 
 function renderScene() {
-  const width = window.innerWidth;
-  const height = window.innerHeight;
+  const { width, height } = getRenderSize();
 
   if (!vrModeEnabled) {
     renderer.setScissorTest(false);
